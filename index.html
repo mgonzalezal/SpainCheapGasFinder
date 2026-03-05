@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Buscador de Combustible</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; }
+        :root {
+            --primary:#6366f1; --primary-dark:#4f46e5;
+            --success:#10b981; --warning:#f59e0b; --danger:#ef4444;
+            --bg:rgba(15,23,42,0.97); --card:rgba(30,41,59,0.97);
+            --input:rgba(51,65,85,0.9); --text:#f1f5f9;
+            --muted:#94a3b8; --border:rgba(71,85,105,0.8);
+        }
+        html,body { width:100%; height:100%; overflow:hidden; font-family:'Inter',sans-serif; color:var(--text); background:#0f172a; }
+
+        /* MAP FULLSCREEN */
+        #map { position:fixed; inset:0; z-index:0; }
+        #map.map-click-active { cursor:crosshair !important; }
+
+        /* TOP BAR */
+        #topBar {
+            position:fixed; top:0; left:0; right:0; z-index:100;
+            padding:10px 12px 0;
+            display:flex; align-items:center; gap:8px;
+            pointer-events:none;
+        }
+        #topBar > * { pointer-events:auto; }
+
+        .search-pill {
+            flex:1; display:flex; align-items:center; gap:8px;
+            background:var(--card); border:1px solid var(--border);
+            border-radius:50px; padding:0 14px; height:46px;
+            backdrop-filter:blur(12px); box-shadow:0 4px 20px rgba(0,0,0,0.4);
+        }
+        .search-pill input {
+            flex:1; background:none; border:none; outline:none;
+            color:var(--text); font-family:'Inter',sans-serif; font-size:0.88rem;
+        }
+        .search-pill input::placeholder { color:var(--muted); }
+
+        .fab {
+            width:46px; height:46px; border-radius:50%;
+            border:1px solid var(--border); background:var(--card);
+            backdrop-filter:blur(12px); box-shadow:0 4px 16px rgba(0,0,0,0.4);
+            color:var(--text); font-size:1.1rem;
+            display:flex; align-items:center; justify-content:center;
+            cursor:pointer; flex-shrink:0; transition:background 0.15s, transform 0.1s;
+        }
+        .fab:hover { background:rgba(99,102,241,0.3); transform:scale(1.05); }
+        .fab.active { background:var(--primary); border-color:var(--primary); }
+
+        /* RIGHT FABs */
+        #fabRight {
+            position:fixed; right:12px; top:66px; z-index:100;
+            display:flex; flex-direction:column; gap:8px;
+        }
+
+        /* MODE PILLS */
+        #modePills {
+            position:fixed; top:66px; left:50%; transform:translateX(-50%);
+            z-index:100; display:flex; gap:4px;
+            background:var(--card); border:1px solid var(--border);
+            border-radius:50px; padding:4px;
+            backdrop-filter:blur(12px); box-shadow:0 4px 16px rgba(0,0,0,0.4);
+        }
+        .mode-pill {
+            padding:6px 16px; border:none; border-radius:50px;
+            font-family:'Inter',sans-serif; font-size:0.78rem; font-weight:600;
+            cursor:pointer; color:var(--muted); background:transparent;
+            transition:all 0.2s; white-space:nowrap;
+        }
+        .mode-pill.active { background:var(--primary); color:white; box-shadow:0 2px 8px rgba(99,102,241,0.4); }
+
+        /* AUTOCOMPLETE */
+        .ac-wrap { position:relative; flex:1; min-width:0; }
+        .ac-wrap > input { width:100%; background:none; border:none; outline:none; color:var(--text); font-family:'Inter',sans-serif; font-size:0.88rem; }
+        .autocomplete-dropdown {
+            position:absolute; top:calc(100% + 10px); left:-14px; right:-14px;
+            background:var(--card); border:1px solid var(--border); border-radius:14px;
+            z-index:9999; max-height:260px; overflow-y:auto;
+            box-shadow:0 8px 32px rgba(0,0,0,0.5); display:none;
+        }
+        .autocomplete-dropdown.open { display:block; }
+        .autocomplete-item { padding:10px 14px; font-size:0.82rem; cursor:pointer; border-bottom:1px solid var(--border); transition:background 0.1s; }
+        .autocomplete-item:last-child { border-bottom:none; border-radius:0 0 14px 14px; }
+        .autocomplete-item:first-child { border-radius:14px 14px 0 0; }
+        .autocomplete-item:hover,.autocomplete-item.active { background:rgba(99,102,241,0.2); }
+        .ac-main { font-weight:600; }
+        .ac-sub { color:var(--muted); font-size:0.72rem; margin-top:2px; }
+
+        /* MODALS */
+        .modal-bg {
+            position:fixed; inset:0; background:rgba(0,0,0,0.55);
+            z-index:200; display:none; align-items:flex-end;
+            backdrop-filter:blur(2px);
+        }
+        .modal-bg.open { display:flex; }
+        .modal-sheet {
+            width:100%; background:var(--card); border-radius:24px 24px 0 0;
+            padding-bottom:max(16px, env(safe-area-inset-bottom));
+            max-height:90vh; overflow-y:auto;
+            animation:slideUp 0.28s cubic-bezier(.22,.68,0,1.2);
+        }
+        @keyframes slideUp { from{transform:translateY(100%)} to{transform:translateY(0)} }
+        .modal-drag { width:36px; height:4px; background:var(--border); border-radius:2px; margin:12px auto 0; }
+        .modal-head { display:flex; align-items:center; justify-content:space-between; padding:14px 20px 10px; }
+        .modal-title { font-size:1rem; font-weight:700; }
+        .modal-x { width:28px; height:28px; border-radius:50%; background:rgba(71,85,105,0.5); border:none; color:var(--text); cursor:pointer; font-size:0.9rem; display:flex; align-items:center; justify-content:center; }
+        .modal-body { padding:6px 20px 16px; }
+        .m-label { font-size:0.72rem; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px; margin:14px 0 8px; }
+
+        /* ROUTE FORM */
+        .route-row { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+        .pt-badge {
+            width:30px; height:30px; border-radius:50%; flex-shrink:0;
+            display:flex; align-items:center; justify-content:center;
+            font-weight:700; font-size:0.8rem; cursor:pointer; transition:transform 0.15s;
+        }
+        .pt-badge.a { background:var(--primary); color:white; }
+        .pt-badge.b { background:var(--success); color:white; }
+        .pt-badge.map-selecting { animation:pulse 0.7s infinite alternate; }
+        @keyframes pulse { from{transform:scale(1)} to{transform:scale(1.2)} }
+        .route-input {
+            flex:1; display:flex; align-items:center; gap:6px;
+            background:var(--input); border:1px solid var(--border);
+            border-radius:12px; padding:0 10px; height:42px;
+        }
+        .route-input .ac-wrap > input { font-size:0.84rem; }
+        .sm-btn { background:rgba(71,85,105,0.6); border:1px solid var(--border); color:var(--text); border-radius:8px; padding:5px 9px; font-size:0.82rem; cursor:pointer; white-space:nowrap; }
+        .sm-btn:hover { background:rgba(99,102,241,0.3); }
+        .divider-line { flex:1; height:1px; background:var(--border); }
+        .corridor-row { display:flex; align-items:center; gap:10px; margin-top:10px; }
+        .corridor-label { font-size:0.82rem; color:var(--muted); display:flex; align-items:center; gap:6px; }
+        select { background:var(--input); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:7px 10px; font-family:'Inter',sans-serif; font-size:0.84rem; cursor:pointer; }
+        .btn-go { flex:1; background:var(--success); border:none; color:white; border-radius:12px; padding:11px; font-family:'Inter',sans-serif; font-weight:700; font-size:0.9rem; cursor:pointer; transition:opacity 0.15s; }
+        .btn-go:hover { opacity:0.88; }
+
+        /* CONFIG */
+        .fuel-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+        .fuel-opt { display:flex; align-items:center; gap:8px; background:var(--input); border:1px solid var(--border); border-radius:12px; padding:11px 12px; cursor:pointer; transition:border-color 0.15s; }
+        .fuel-opt:has(input:checked) { border-color:var(--primary); background:rgba(99,102,241,0.12); }
+        .fuel-opt input { accent-color:var(--primary); width:16px; height:16px; }
+        .fuel-opt span { font-size:0.84rem; font-weight:500; }
+        .cfg-row { display:flex; gap:12px; }
+        .cfg-field { flex:1; display:flex; flex-direction:column; gap:5px; }
+        .cfg-field label { font-size:0.73rem; color:var(--muted); font-weight:500; }
+        .cfg-input { background:var(--input); border:1px solid var(--border); border-radius:10px; padding:10px 12px; color:var(--text); font-family:'Inter',sans-serif; font-size:0.9rem; font-weight:600; width:100%; }
+        .cfg-input:focus { outline:none; border-color:var(--primary); }
+
+        /* BOTTOM SHEET */
+        #sheet {
+            position:fixed; bottom:0; left:0; right:0; z-index:150;
+            background:var(--card); border-radius:24px 24px 0 0;
+            box-shadow:0 -4px 40px rgba(0,0,0,0.5);
+            display:flex; flex-direction:column;
+            height:56px; max-height:82vh;
+            transition:height 0.3s cubic-bezier(.22,.68,0,1.1);
+        }
+        #sheet.expanded { height:70vh; }
+        #sheet-handle { display:flex; flex-direction:column; align-items:center; padding:8px 16px 0; cursor:pointer; flex-shrink:0; }
+        .handle-bar { width:36px; height:4px; background:var(--border); border-radius:2px; }
+        #sheet-header { display:flex; align-items:center; justify-content:space-between; padding:5px 16px 8px; cursor:pointer; flex-shrink:0; }
+        #sheet-title { font-size:0.9rem; font-weight:700; }
+        #sheet-meta { font-size:0.73rem; color:var(--muted); }
+        #sheet-chevron { font-size:0.65rem; color:var(--muted); transition:transform 0.25s; }
+        #sheet.expanded #sheet-chevron { transform:rotate(180deg); }
+        #sheet-body { flex:1; overflow-y:auto; overflow-x:hidden; }
+        #sheet-body::-webkit-scrollbar { width:3px; }
+        #sheet-body::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+
+        /* route alts */
+        #routeAlternatives { padding:4px 14px 6px; border-bottom:1px solid var(--border); display:none; }
+        .alt-label { font-size:0.7rem; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px; }
+        .route-alt-card { display:flex; align-items:center; justify-content:space-between; padding:9px 12px; border-radius:12px; background:var(--input); border:1px solid var(--border); margin-bottom:6px; cursor:pointer; }
+        .route-alt-card.active { border-color:var(--primary); background:rgba(99,102,241,0.1); }
+        .alt-name { font-size:0.84rem; font-weight:600; }
+        .alt-meta { font-size:0.74rem; color:var(--muted); margin-top:2px; }
+        .alt-badge { font-size:0.7rem; padding:3px 8px; border-radius:6px; font-weight:600; background:rgba(99,102,241,0.2); color:var(--primary); border:1px solid var(--primary); }
+
+        /* route info */
+        #routeInfoBar { padding:6px 14px; display:none; gap:6px; flex-wrap:wrap; border-bottom:1px solid var(--border); }
+        .r-badge { background:rgba(99,102,241,0.15); border:1px solid rgba(99,102,241,0.3); color:var(--text); padding:4px 10px; border-radius:8px; font-size:0.76rem; font-weight:600; }
+
+        /* station cards */
+        #stationList { padding:8px 12px 80px; }
+        .loading { text-align:center; color:var(--muted); padding:28px 16px; font-size:0.85rem; }
+        .station-card { background:rgba(51,65,85,0.5); border:1px solid var(--border); border-radius:16px; padding:12px 14px; margin-bottom:8px; cursor:pointer; transition:border-color 0.15s, background 0.15s; }
+        .station-card:active { background:rgba(99,102,241,0.1); }
+        .station-card.selected { border-color:var(--success); background:rgba(16,185,129,0.07); }
+        .s-name { font-size:0.88rem; font-weight:700; display:flex; align-items:center; gap:6px; margin-bottom:3px; }
+        .s-num { background:var(--primary); color:white; border-radius:6px; padding:1px 6px; font-size:0.68rem; font-weight:700; }
+        .s-addr { font-size:0.74rem; color:var(--muted); margin-bottom:6px; }
+        .s-dist { display:inline-block; background:rgba(99,102,241,0.1); border:1px solid rgba(99,102,241,0.25); color:var(--text); padding:2px 8px; border-radius:6px; font-size:0.74rem; font-weight:600; margin-bottom:5px; }
+        .s-detour { display:inline-block; padding:2px 8px; border-radius:6px; font-size:0.74rem; font-weight:600; margin-bottom:4px; margin-right:3px; background:rgba(16,185,129,0.1); color:var(--success); border:1px solid rgba(16,185,129,0.3); }
+        .price-row { display:flex; align-items:center; gap:8px; margin-top:6px; }
+        .price-chip { display:inline-flex; align-items:center; gap:6px; background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.3); border-radius:10px; padding:5px 12px; }
+        .price-type { font-size:0.68rem; color:var(--muted); font-weight:600; text-transform:uppercase; }
+        .price-val { font-size:1rem; font-weight:700; color:var(--success); }
+        .savings { display:flex; align-items:center; gap:5px; margin-top:7px; padding:6px 10px; border-radius:9px; font-size:0.77rem; font-weight:700; border:1px solid; }
+        .savings.pos { background:rgba(16,185,129,0.1); color:var(--success); border-color:rgba(16,185,129,0.3); }
+        .savings.neg { background:rgba(239,68,68,0.08); color:var(--danger); border-color:rgba(239,68,68,0.25); }
+        .savings.neu { background:rgba(148,163,184,0.1); color:var(--muted); border-color:rgba(148,163,184,0.25); }
+        .savings-detail { font-size:0.68rem; font-weight:400; opacity:0.85; }
+
+        .route-summary { background:rgba(99,102,241,0.07); border:1px solid rgba(99,102,241,0.2); border-radius:14px; padding:12px 14px; margin-bottom:10px; }
+        .rs-title { font-size:0.72rem; font-weight:700; color:var(--primary); text-transform:uppercase; letter-spacing:0.4px; margin-bottom:8px; }
+        .rs-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+        .rs-label { font-size:0.68rem; color:var(--muted); }
+        .rs-val { font-size:0.86rem; font-weight:700; }
+
+        /* TOAST */
+        #toast {
+            position:fixed; bottom:70px; left:12px; right:12px; z-index:400;
+            background:var(--card); border:1px solid var(--border);
+            border-radius:12px; padding:10px 14px; font-size:0.82rem;
+            display:none; backdrop-filter:blur(12px);
+            box-shadow:0 4px 20px rgba(0,0,0,0.4);
+        }
+        #toast.err { border-color:var(--danger); color:var(--danger); }
+
+        /* DESKTOP */
+        @media (min-width:769px) {
+            #sheet { top:0; bottom:0; left:0; right:auto; width:380px; height:100%!important; max-height:100vh; border-radius:0; box-shadow:4px 0 32px rgba(0,0,0,0.4); }
+            #sheet.expanded { height:100%!important; }
+            #sheet-handle { display:none; }
+            #sheet-header { cursor:default; }
+            #sheet-chevron { display:none; }
+            #topBar { left:380px; }
+            #fabRight { right:12px; }
+            #modePills { left:calc(380px + 50%); }
+            #toast { left:392px; right:12px; bottom:20px; }
+            .modal-bg { align-items:center; justify-content:center; padding:20px; }
+            .modal-sheet { max-width:500px; border-radius:24px; }
+        }
+
+        .road-dist-loading { opacity:0.6; font-style:italic; }
+    </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<!-- TOP SEARCH BAR -->
+<div id="topBar">
+    <div class="search-pill" id="singleBox">
+        <span style="color:var(--muted);font-size:1rem;flex-shrink:0;">🔍</span>
+        <div class="ac-wrap">
+            <input type="text" id="addressInput" placeholder="Buscar dirección..." autocomplete="off" />
+            <div class="autocomplete-dropdown" id="acSingle"></div>
+        </div>
+        <button onclick="getUserLocationAndLoad()" style="background:none;border:none;color:var(--primary);font-size:1.1rem;cursor:pointer;padding:2px 0 0;flex-shrink:0;">📍</button>
+    </div>
+    <button class="fab" id="refreshBtn" onclick="refreshData()" disabled title="Actualizar" style="flex-shrink:0;">🔄</button>
+</div>
+
+<!-- MODE PILLS -->
+<div id="modePills">
+    <button class="mode-pill active" id="tabSingle" onclick="switchMode('single')">📍 Punto</button>
+    <button class="mode-pill" id="tabRoute" onclick="switchMode('route')">🗺️ Ruta</button>
+</div>
+
+<!-- RIGHT FABs -->
+<div id="fabRight">
+    <button class="fab" onclick="openModal('carModal')" title="Configuración">⚙️</button>
+    <button class="fab" id="openRouteBtn" onclick="openModal('routeModal')" title="Configurar ruta" style="display:none;">🗺️</button>
+</div>
+
+<!-- TOAST -->
+<div id="toast"></div>
+
+<!-- ROUTE MODAL -->
+<div class="modal-bg" id="routeModal" onclick="if(event.target===this)closeModal('routeModal')">
+    <div class="modal-sheet">
+        <div class="modal-drag"></div>
+        <div class="modal-head">
+            <span class="modal-title">🗺️ Configurar Ruta</span>
+            <button class="modal-x" onclick="closeModal('routeModal')">✕</button>
+        </div>
+        <div class="modal-body">
+            <div class="route-row">
+                <div class="pt-badge a" id="pointABadge" onclick="setMapClickTarget('A')" title="Clic en mapa">A</div>
+                <div class="route-input">
+                    <div class="ac-wrap">
+                        <input type="text" id="pointAInput" placeholder="Origen..." autocomplete="off" />
+                        <div class="autocomplete-dropdown" id="acPointA"></div>
+                    </div>
+                    <button class="sm-btn" onclick="searchPoint('A')">🔍</button>
+                    <button class="sm-btn" onclick="useMyLocationForPoint('A')">📍</button>
+                </div>
+            </div>
+            <div class="route-row" style="margin:2px 0 4px;">
+                <div class="divider-line"></div>
+                <button class="sm-btn" onclick="invertRoute()">⇅</button>
+                <div class="divider-line"></div>
+            </div>
+            <div class="route-row">
+                <div class="pt-badge b" id="pointBBadge" onclick="setMapClickTarget('B')" title="Clic en mapa">B</div>
+                <div class="route-input">
+                    <div class="ac-wrap">
+                        <input type="text" id="pointBInput" placeholder="Destino..." autocomplete="off" />
+                        <div class="autocomplete-dropdown" id="acPointB"></div>
+                    </div>
+                    <button class="sm-btn" onclick="searchPoint('B')">🔍</button>
+                    <button class="sm-btn" onclick="useMyLocationForPoint('B')">📍</button>
+                </div>
+            </div>
+            <div class="corridor-row">
+                <span class="corridor-label">Corredor:
+                    <select id="corridorSelect">
+                        <option value="3">3 km</option>
+                        <option value="5" selected>5 km</option>
+                        <option value="10">10 km</option>
+                        <option value="20">20 km</option>
+                    </select>
+                </span>
+                <button class="btn-go" onclick="traceRoute()">🗺️ Trazar Ruta</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- CONFIG MODAL -->
+<div class="modal-bg" id="carModal" onclick="if(event.target===this)closeModal('carModal')">
+    <div class="modal-sheet">
+        <div class="modal-drag"></div>
+        <div class="modal-head">
+            <span class="modal-title">⚙️ Configuración</span>
+            <button class="modal-x" onclick="closeModal('carModal')">✕</button>
+        </div>
+        <div class="modal-body">
+            <div class="m-label">⛽ Tipo de Combustible</div>
+            <div class="fuel-grid">
+                <label class="fuel-opt"><input type="radio" name="fuelType" id="filter-g95" value="g95" checked><span>Gasolina 95</span></label>
+                <label class="fuel-opt"><input type="radio" name="fuelType" id="filter-g98" value="g98"><span>Gasolina 98</span></label>
+                <label class="fuel-opt"><input type="radio" name="fuelType" id="filter-diesel" value="diesel"><span>Gasóleo A</span></label>
+                <label class="fuel-opt"><input type="radio" name="fuelType" id="filter-dieselb" value="dieselb"><span>Gasóleo B</span></label>
+            </div>
+            <div class="m-label">📊 Ordenar por</div>
+            <select id="sortSelect" style="width:100%;margin-bottom:2px;">
+                <option value="distance">Cercanía</option>
+                <option value="price">Precio más barato</option>
+                <option value="savings" selected>💰 Mayor ahorro neto</option>
+            </select>
+            <div class="m-label">🚗 Mi Coche</div>
+            <div class="cfg-row">
+                <div class="cfg-field">
+                    <label>Consumo (l/100km)</label>
+                    <input type="number" id="carConsumption" class="cfg-input" min="3" max="25" step="0.5" value="7" />
+                </div>
+                <div class="cfg-field">
+                    <label>Litros a repostar</label>
+                    <input type="number" id="carLiters" class="cfg-input" min="10" max="120" step="5" value="50" />
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- BOTTOM SHEET -->
+<div id="sheet">
+    <div id="sheet-handle" onclick="toggleSheet()"><div class="handle-bar"></div></div>
+    <div id="sheet-header" onclick="toggleSheet()">
+        <div>
+            <div id="sheet-title">Gasolineras Cercanas</div>
+            <div id="sheet-meta">Busca tu ubicación para comenzar</div>
+        </div>
+        <span id="sheet-chevron">▲</span>
+    </div>
+    <div id="sheet-body">
+        <div id="routeInfoBar"></div>
+        <div id="routeAlternatives">
+            <div class="alt-label">Rutas disponibles</div>
+            <div id="routeAltList"></div>
+        </div>
+        <div id="stationList"><div class="loading">Busca tu ubicación para comenzar</div></div>
+    </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    let map, userLocation, markers=[], stations=[], currentMode='single';
+    let pointALocation=null, pointBLocation=null;
+    let allRoutes=[], routeLayers=[], selectedRouteIndex=0, routeData=null, routeStations=[];
+    let previewLayer=null;
+    const roadDistanceCache={};
+    const ROUTE_COLORS=['#6366f1','#f59e0b','#06b6d4','#ec4899'];
+    const ROUTE_NAMES=['Ruta Principal','Ruta Alternativa 1','Ruta Alternativa 2','Ruta Alternativa 3'];
+
+    // ── Modals ──────────────────────────────────────────────────────────
+    function openModal(id) { document.getElementById(id).classList.add('open'); }
+    function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+    // ── Sheet ───────────────────────────────────────────────────────────
+    function toggleSheet() { document.getElementById('sheet').classList.toggle('expanded'); }
+    function expandSheet() { document.getElementById('sheet').classList.add('expanded'); }
+
+    // ── Toast ───────────────────────────────────────────────────────────
+    let toastTimer;
+    function showStatus(msg, isErr=false) {
+        const t = document.getElementById('toast');
+        t.textContent = msg; t.className = isErr ? 'err' : '';
+        t.style.display = 'block';
+        clearTimeout(toastTimer);
+        if (!isErr) toastTimer = setTimeout(() => t.style.display='none', 4000);
+    }
+
+    // ── Map ─────────────────────────────────────────────────────────────
+    function initMap(lat=40.4168, lng=-3.7038) {
+        if (map) map.remove();
+        map = L.map('map').setView([lat,lng],13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'© OpenStreetMap' }).addTo(map);
+        map.on('click', async (e) => {
+            if (!mapClickTarget) return;
+            const {lat,lng} = e.latlng;
+            let label=null;
+            try {
+                const r = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,{headers:{'User-Agent':'GasolinerasEspana/1.0'}});
+                const d = await r.json();
+                if (d?.display_name) label = d.display_name.split(',').slice(0,3).join(',');
+            } catch {}
+            const pt = mapClickTarget;
+            mapClickTarget=null;
+            document.getElementById('map').classList.remove('map-click-active');
+            document.getElementById('pointABadge').classList.remove('map-selecting');
+            document.getElementById('pointBBadge').classList.remove('map-selecting');
+            await setPointFromCoords(pt, lat, lng, label);
+            openModal('routeModal');
+        });
+    }
+
+    // ── Mode ────────────────────────────────────────────────────────────
+    function switchMode(mode) {
+        currentMode = mode;
+        document.getElementById('tabSingle').classList.toggle('active', mode==='single');
+        document.getElementById('tabRoute').classList.toggle('active', mode==='route');
+        document.getElementById('singleBox').style.display = mode==='single' ? '' : 'none';
+        document.getElementById('openRouteBtn').style.display = mode==='route' ? 'flex' : 'none';
+        document.getElementById('sheet-title').textContent = mode==='single' ? 'Gasolineras Cercanas' : 'Gasolineras en la Ruta';
+        document.getElementById('sheet-meta').textContent = '';
+        document.getElementById('stationList').innerHTML = '<div class="loading">'+(mode==='single'?'Busca tu ubicación para comenzar':'Configura origen y destino')+'</div>';
+        document.getElementById('routeInfoBar').style.display='none';
+        document.getElementById('toast').style.display='none';
+        if (mode==='route') openModal('routeModal');
+        if (mode==='single') {
+            clearAllRoutesFromMap();
+            if (previewLayer) { previewLayer.remove(); previewLayer=null; }
+            allRoutes=[]; selectedRouteIndex=0; routeData=null;
+            pointALocation=null; pointBLocation=null; routeStations=[];
+            window.displayedStations=[];
+            document.getElementById('routeAlternatives').style.display='none';
+            addMarkersToMap();
+        }
+    }
+
+    // ── Geo helpers ─────────────────────────────────────────────────────
+    function calcDist(lat1,lon1,lat2,lon2) {
+        const R=6371, dLat=(lat2-lat1)*Math.PI/180, dLon=(lon2-lon1)*Math.PI/180;
+        const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+        return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+    }
+
+    function minDistToRoute(lat,lng,coords) {
+        let min=Infinity;
+        for (let i=0;i<coords.length-1;i++) {
+            const [aLng,aLat]=coords[i],[bLng,bLat]=coords[i+1];
+            const dx=bLng-aLng, dy=bLat-aLat, len=dx*dx+dy*dy;
+            const t=len?Math.max(0,Math.min(1,((lng-aLng)*dx+(lat-aLat)*dy)/len)):0;
+            const d=calcDist(lat,lng,aLat+t*dy,aLng+t*dx);
+            if (d<min) min=d;
+        }
+        return min;
+    }
+
+    async function fetchRoadDist(aLat,aLng,bLat,bLng) {
+        const k=`${aLat.toFixed(5)},${aLng.toFixed(5)}_${bLat.toFixed(5)},${bLng.toFixed(5)}`;
+        if (roadDistanceCache[k]) return roadDistanceCache[k];
+        try {
+            const r=await fetch(`https://routing.openstreetmap.de/routed-car/route/v1/driving/${aLng},${aLat};${bLng},${bLat}?overview=false`);
+            const d=await r.json();
+            if (d.code!=='Ok'||!d.routes[0]) throw 0;
+            const res={distance:d.routes[0].distance/1000,duration:d.routes[0].duration/60};
+            roadDistanceCache[k]=res; return res;
+        } catch { return null; }
+    }
+
+    async function fetchRouteGeom(aLat,aLng,bLat,bLng) {
+        try {
+            const r=await fetch(`https://routing.openstreetmap.de/routed-car/route/v1/driving/${aLng},${aLat};${bLng},${bLat}?overview=full&geometries=geojson`);
+            const d=await r.json();
+            if (d.code!=='Ok'||!d.routes[0]) throw 0;
+            return {distance:d.routes[0].distance/1000,duration:d.routes[0].duration/60,coordinates:d.routes[0].geometry.coordinates};
+        } catch { return null; }
+    }
+
+    async function fetchAllRoutes(aLat,aLng,bLat,bLng) {
+        const r=await fetch(`https://routing.openstreetmap.de/routed-car/route/v1/driving/${aLng},${aLat};${bLng},${bLat}?overview=full&geometries=geojson&alternatives=true`);
+        const d=await r.json();
+        if (d.code!=='Ok'||!d.routes?.length) throw new Error('Sin ruta');
+        return d.routes.map(r=>({distance:r.distance/1000,duration:r.duration/60,coordinates:r.geometry.coordinates}));
+    }
+
+    // ── Station preview ─────────────────────────────────────────────────
+    async function showStationPreview(idx) {
+        if (previewLayer) { previewLayer.remove(); previewLayer=null; }
+        document.querySelectorAll('.station-card').forEach(c=>c.classList.remove('selected'));
+        const card=document.querySelector(`.station-card[data-index="${idx}"]`);
+        const station=(window.displayedStations||stations)[idx];
+        if (!station) return;
+        if (card) card.classList.add('selected');
+        if (station.marker) station.marker.openPopup();
+        let geom=null;
+        if (currentMode==='single'&&userLocation) {
+            geom=await fetchRouteGeom(userLocation.lat,userLocation.lng,station.lat,station.lng);
+        } else if (currentMode==='route'&&pointALocation&&pointBLocation) {
+            const [s1,s2]=await Promise.all([
+                fetchRouteGeom(pointALocation.lat,pointALocation.lng,station.lat,station.lng),
+                fetchRouteGeom(station.lat,station.lng,pointBLocation.lat,pointBLocation.lng)
+            ]);
+            if (s1&&s2) geom={distance:s1.distance+s2.distance,duration:s1.duration+s2.duration,coordinates:[...s1.coordinates,...s2.coordinates]};
+        }
+        if (!geom) return;
+        previewLayer=L.polyline(geom.coordinates.map(([lng,lat])=>[lat,lng]),{color:'#10b981',weight:5,opacity:0.85,dashArray:'8 5'}).addTo(map);
+        map.fitBounds(previewLayer.getBounds(),{padding:[60,60]});
+        if (card) {
+            const el=card.querySelector('.road-dist-info');
+            if (el) { el.innerHTML=`🛣️ <strong>${geom.distance.toFixed(1)} km</strong> · ⏱️ ${fmtDur(geom.duration)}`; el.classList.remove('road-dist-loading'); }
+        }
+    }
+
+    // ── Geocode ─────────────────────────────────────────────────────────
+    async function geocodeAddress(addr) {
+        try {
+            const r=await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(addr)}&format=json&limit=1&countrycodes=es`,{headers:{'User-Agent':'GasolinerasEspana/1.0'}});
+            const d=await r.json();
+            if (!d.length) return null;
+            return {lat:parseFloat(d[0].lat),lng:parseFloat(d[0].lon),displayName:d[0].display_name};
+        } catch { return null; }
+    }
+
+    // ── Fetch stations (single) ─────────────────────────────────────────
+    async function fetchGasStations(lat,lng) {
+        document.getElementById('refreshBtn').disabled=true;
+        showStatus('⛽ Cargando gasolineras...');
+        try {
+            const res=await fetch('https://sedeaplicaciones.minetur.gob.es/ServiciosRESTCarburantes/PreciosCarburantes/EstacionesTerrestres/');
+            const data=await res.json();
+            stations=data.ListaEESSPrecio
+                .map(s=>({...s,lat:parseFloat(s['Latitud'].replace(',','.')),lng:parseFloat(s['Longitud (WGS84)'].replace(',','.'))}))
+                .filter(s=>!isNaN(s.lat)&&!isNaN(s.lng))
+                .map(s=>({...s,distance:calcDist(lat,lng,s.lat,s.lng)}))
+                .filter(s=>s.distance<=15).sort((a,b)=>a.distance-b.distance).slice(0,50);
+            displayStations();
+            document.getElementById('sheet-meta').textContent=`${stations.length} gasolineras`;
+            expandSheet();
+            showStatus(`✅ ${stations.length} gasolineras encontradas`);
+            fetchRoadDistsProgressively();
+        } catch(e) { showStatus('❌ Error: '+e.message,true); }
+        document.getElementById('refreshBtn').disabled=false;
+    }
+
+    async function fetchRoadDistsProgressively() {
+        if (!userLocation) return;
+        await Promise.allSettled(stations.map(async s=>{
+            const r=await fetchRoadDist(userLocation.lat,userLocation.lng,s.lat,s.lng);
+            if (r) {
+                s.roadDistance=r.distance;
+                const el=document.querySelector(`.station-card[data-station-id="${s['IDEESS']}"] .road-dist-info`);
+                if (el) el.innerHTML=`🛣️ <strong>${r.distance.toFixed(1)} km</strong>`;
+            }
+        }));
+    }
+
+    // ── Route methods ───────────────────────────────────────────────────
+    function clearAllRoutesFromMap() { routeLayers.forEach(l=>l.remove()); routeLayers=[]; }
+
+    function drawAllRoutesOnMap(routes,activeIdx) {
+        clearAllRoutesFromMap();
+        routeLayers=routes.map((r,i)=>{
+            const ll=r.coordinates.map(([lng,lat])=>[lat,lng]);
+            const layer=L.polyline(ll,{color:ROUTE_COLORS[i%4],weight:i===activeIdx?7:4,opacity:i===activeIdx?0.9:0.4,dashArray:i===activeIdx?null:'6 4'}).addTo(map);
+            layer.on('click',()=>selectRoute(i));
+            return layer;
+        });
+        if (routeLayers[activeIdx]) map.fitBounds(routeLayers[activeIdx].getBounds(),{padding:[60,60]});
+    }
+
+    function renderRouteAltsUI(routes,activeIdx) {
+        const c=document.getElementById('routeAlternatives');
+        const l=document.getElementById('routeAltList');
+        if (routes.length<=1) { c.style.display='none'; return; }
+        c.style.display='block';
+        l.innerHTML=routes.map((r,i)=>`
+            <div class="route-alt-card ${i===activeIdx?'active':''}" onclick="selectRoute(${i})">
+                <div>
+                    <div class="alt-name" style="color:${ROUTE_COLORS[i%4]}">${ROUTE_NAMES[i]}</div>
+                    <div class="alt-meta">🛣️ ${r.distance.toFixed(1)} km · ⏱️ ${fmtDur(r.duration)}${i>0?` <span style="color:var(--warning)">+${(r.distance-routes[0].distance).toFixed(1)} km</span>`:''}</div>
+                </div>
+                ${i===activeIdx?'<span class="alt-badge">✓ Activa</span>':'<span style="font-size:0.73rem;color:var(--muted)">Seleccionar</span>'}
+            </div>`).join('');
+    }
+
+    function selectRoute(idx) {
+        selectedRouteIndex=idx; routeData=allRoutes[idx];
+        drawAllRoutesOnMap(allRoutes,idx);
+        renderRouteAltsUI(allRoutes,idx);
+        stations=routeStations;
+        fetchGasStationsAlongRoute();
+    }
+
+    async function fetchGasStationsAlongRoute() {
+        if (!routeData) return;
+        document.getElementById('refreshBtn').disabled=true;
+        const corridorKm=parseFloat(document.getElementById('corridorSelect').value);
+        showStatus('🔍 Buscando gasolineras en la ruta...');
+        try {
+            const res=await fetch('https://sedeaplicaciones.minetur.gob.es/ServiciosRESTCarburantes/PreciosCarburantes/EstacionesTerrestres/');
+            const data=await res.json();
+            const candidates=data.ListaEESSPrecio
+                .map(s=>{const lat=parseFloat(s['Latitud'].replace(',','.')),lng=parseFloat(s['Longitud (WGS84)'].replace(',','.'));return{...s,lat,lng,distToRoute:minDistToRoute(lat,lng,routeData.coordinates)};})
+                .filter(s=>!isNaN(s.lat)&&!isNaN(s.lng)&&s.distToRoute<=corridorKm).slice(0,80);
+            routeStations=candidates; stations=candidates; window.displayedStations=[];
+            const bar=document.getElementById('routeInfoBar');
+            bar.style.display='flex';
+            bar.innerHTML=`<span class="r-badge">🛣️ ${routeData.distance.toFixed(1)} km</span><span class="r-badge">⏱️ ${fmtDur(routeData.duration)}</span><span class="r-badge">⛽ ${candidates.length} gasolineras</span>`;
+            const listDiv=document.getElementById('stationList');
+            listDiv.innerHTML=`<div class="loading">Calculando desvíos (0/${candidates.length})...</div>`;
+            addMarkersToMap(); expandSheet();
+            let resolved=0; const ready=[];
+            await Promise.allSettled(candidates.map(async s=>{
+                const [s1,s2]=await Promise.all([
+                    fetchRoadDist(pointALocation.lat,pointALocation.lng,s.lat,s.lng),
+                    fetchRoadDist(s.lat,s.lng,pointBLocation.lat,pointBLocation.lng)
+                ]);
+                resolved++;
+                if (s1&&s2) { s.detourDistance=s1.distance+s2.distance; s.detourExtra=s.detourDistance-routeData.distance; ready.push(s); }
+                listDiv.innerHTML=`<div class="loading">Calculando desvíos (${resolved}/${candidates.length})...</div>`;
+            }));
+            stations=ready; window.displayedStations=[];
+            displayStations();
+            document.getElementById('sheet-meta').textContent=`${ready.length} gasolineras`;
+            showStatus(`✅ ${ready.length} gasolineras en ruta`);
+        } catch(e) { showStatus('❌ Error: '+e.message,true); }
+        document.getElementById('refreshBtn').disabled=false;
+    }
+
+    // ── Display ──────────────────────────────────────────────────────────
+    const FUEL_MAP={g95:'Precio Gasolina 95 E5',g98:'Precio Gasolina 98 E5',diesel:'Precio Gasoleo A',dieselb:'Precio Gasoleo B'};
+    const FUEL_NAMES={g95:'G95',g98:'G98',diesel:'Diesel A',dieselb:'Diesel B'};
+
+    function fmtDur(m) { if(m<60) return `${Math.round(m)} min`; const h=Math.floor(m/60); return `${h}h ${Math.round(m%60)}min`; }
+
+    function getCarCfg() { return { c:parseFloat(document.getElementById('carConsumption').value)||7, l:parseFloat(document.getElementById('carLiters').value)||50 }; }
+    function saveCarCfg() { try { const {c,l}=getCarCfg(); localStorage.setItem('carConsumption',c); localStorage.setItem('carLiters',l); } catch {} }
+    function loadCarCfg() { try { const c=localStorage.getItem('carConsumption'),l=localStorage.getItem('carLiters'); if(c) document.getElementById('carConsumption').value=c; if(l) document.getElementById('carLiters').value=l; } catch {} }
+
+    function displayStations() {
+        const listDiv=document.getElementById('stationList');
+        const fuel=document.querySelector('input[name="fuelType"]:checked')?.value||'g95';
+        const field=FUEL_MAP[fuel];
+        const sort=document.getElementById('sortSelect')?.value||'savings';
+        const {c,l}=getCarCfg();
+
+        let f=stations.filter(s=>s[field]&&s[field]!=='');
+        const prices=f.map(s=>parseFloat((s[field]||'0').replace(',','.'))).filter(p=>p>0);
+        const refP=prices.length?Math.max(...prices):0;
+
+        f.forEach(s=>{
+            const p=parseFloat((s[field]||'0').replace(',','.'));
+            if (!p) { s._net=null; return; }
+            const km=currentMode==='route'?(s.detourExtra||0):(s.roadDistance||s.distance||0);
+            s._fuel=(refP-p)*l;
+            s._detourCost=(km/100)*c*p;
+            s._net=s._fuel-s._detourCost;
+        });
+
+        f.sort((a,b)=>{
+            if (sort==='distance') return currentMode==='route'?(a.detourExtra||0)-(b.detourExtra||0):(a.distance||0)-(b.distance||0);
+            if (sort==='price') return parseFloat((a[field]||'999').replace(',','.'))-parseFloat((b[field]||'999').replace(',','.'));
+            if (sort==='savings') return (b._net||0)-(a._net||0);
+            return 0;
+        });
+
+        window.displayedStations=f;
+        if (!f.length) { listDiv.innerHTML='<div class="loading">No hay gasolineras con el combustible seleccionado</div>'; addMarkersToMap(); return; }
+
+        let summary='';
+        if (currentMode==='route'&&routeData) {
+            const best=[...f].sort((a,b)=>(b._net||0)-(a._net||0))[0];
+            const cheap=[...f].sort((a,b)=>parseFloat((a[field]||'999').replace(',','.'))-parseFloat((b[field]||'999').replace(',','.')))[0];
+            summary=`<div class="route-summary">
+                <div class="rs-title">🗺️ Resumen de Ruta</div>
+                <div class="rs-grid">
+                    <div><div class="rs-label">Distancia</div><div class="rs-val">${routeData.distance.toFixed(1)} km</div></div>
+                    <div><div class="rs-label">Tiempo</div><div class="rs-val">${fmtDur(routeData.duration)}</div></div>
+                    <div><div class="rs-label">Precio más bajo</div><div class="rs-val" style="color:var(--success)">${cheap?.[field]||'-'}€</div></div>
+                    ${best?._net!=null?`<div><div class="rs-label">Mejor ahorro</div><div class="rs-val" style="color:${best._net>=0?'var(--success)':'var(--danger)'};">${best._net>=0?'+':''}${best._net.toFixed(2)}€</div></div>`:''}
+                </div></div>`;
+        }
+
+        listDiv.innerHTML=summary+f.map((s,i)=>{
+            const price=s[field]||'-';
+            let distBadge='';
+            if (currentMode==='route') {
+                const col=s.detourExtra>5?'var(--danger)':s.detourExtra>2?'var(--warning)':'var(--success)';
+                distBadge=`<span class="s-detour">🛣️ <strong>${s.detourDistance.toFixed(1)} km</strong></span><span class="s-detour" style="color:${col};border-color:${col};background:transparent;">${s.detourExtra>0?'+':''}${s.detourExtra.toFixed(1)} km desvío</span>`;
+            } else {
+                const hasR=s.roadDistance!=null;
+                distBadge=`<span class="s-dist road-dist-info${hasR?'':' road-dist-loading'}">${hasR?`🛣️ <strong>${s.roadDistance.toFixed(1)} km</strong>`:`📍 ${s.distance.toFixed(1)} km`}</span>`;
+            }
+            let savBadge='';
+            if (s._net!=null) {
+                const cls=s._net>0.5?'pos':s._net<-0.5?'neg':'neu';
+                const sign=s._net>0?'+':'';
+                const parts=[];
+                if (s._fuel!=null) parts.push(`${s._fuel>=0?'+':''}${s._fuel.toFixed(2)}€ precio`);
+                if (s._detourCost>0.01) parts.push(`−${s._detourCost.toFixed(2)}€ desvío`);
+                savBadge=`<div class="savings ${cls}">💰 Ahorro neto: <strong>${sign}${s._net.toFixed(2)}€</strong>${parts.length?`<span class="savings-detail"> (${parts.join(' · ')})</span>`:''}</div>`;
+            }
+            return `<div class="station-card" data-index="${i}" data-station-id="${s['IDEESS']}" onclick="showStationPreview(${i})">
+                <div class="s-name"><span class="s-num">#${i+1}</span>${s['Rótulo']||'Gasolinera'}</div>
+                ${distBadge}
+                <div class="s-addr">${s['Dirección']}, ${s['Localidad']}</div>
+                <div class="price-row"><div class="price-chip"><span class="price-type">${FUEL_NAMES[fuel]}</span><span class="price-val">${price}€</span></div></div>
+                ${savBadge}
+            </div>`;
+        }).join('');
+
+        addMarkersToMap();
+    }
+
+    function addMarkersToMap() {
+        markers.forEach(m=>m.remove()); markers=[];
+        const fuel=document.querySelector('input[name="fuelType"]:checked')?.value||'g95';
+        const field=FUEL_MAP[fuel];
+
+        if (currentMode==='single'&&userLocation) {
+            const ic=L.divIcon({className:'',html:'<div style="background:#6366f1;width:18px;height:18px;border-radius:50%;border:3px solid white;box-shadow:0 2px 10px rgba(99,102,241,0.6);"></div>',iconSize:[18,18]});
+            markers.push(L.marker([userLocation.lat,userLocation.lng],{icon:ic}).addTo(map));
+        }
+        if (currentMode==='route') {
+            if (pointALocation) {
+                const ic=L.divIcon({className:'',html:`<div style="background:#6366f1;width:28px;height:28px;border-radius:50%;border:3px solid white;display:flex;align-items:center;justify-content:center;font-weight:700;color:white;font-family:Inter,sans-serif;font-size:12px;box-shadow:0 2px 10px rgba(99,102,241,0.5);">A</div>`,iconSize:[28,28]});
+                markers.push(L.marker([pointALocation.lat,pointALocation.lng],{icon:ic}).addTo(map));
+            }
+            if (pointBLocation) {
+                const ic=L.divIcon({className:'',html:`<div style="background:#10b981;width:28px;height:28px;border-radius:50%;border:3px solid white;display:flex;align-items:center;justify-content:center;font-weight:700;color:white;font-family:Inter,sans-serif;font-size:12px;box-shadow:0 2px 10px rgba(16,185,129,0.5);">B</div>`,iconSize:[28,28]});
+                markers.push(L.marker([pointBLocation.lat,pointBLocation.lng],{icon:ic}).addTo(map));
+            }
+        }
+
+        const display=window.displayedStations?.length?window.displayedStations:stations;
+        display.forEach((s,i)=>{
+            const price=s[field]; if (!price) return;
+            const pv=parseFloat(price.replace(',','.'));
+            const allP=display.map(x=>parseFloat((x[field]||'0').replace(',','.'))).filter(p=>p>0);
+            const norm=allP.length>1?(pv-Math.min(...allP))/(Math.max(...allP)-Math.min(...allP)):0.5;
+            const r=Math.round(norm*220),g=Math.round((1-norm)*170);
+            const ic=L.divIcon({className:'',html:`<div style="background:rgb(${r},${g},20);color:white;border-radius:14px;padding:3px 8px;font-size:0.68rem;font-weight:700;border:2px solid rgba(255,255,255,0.8);white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.4);font-family:Inter,sans-serif;">${i+1}</div>`,iconSize:[32,22]});
+            const mk=L.marker([s.lat,s.lng],{icon:ic}).addTo(map);
+            const distLabel=currentMode==='route'?(s.detourExtra!=null?`+${s.detourExtra.toFixed(1)} km desvío`:''):(s.roadDistance?`${s.roadDistance.toFixed(1)} km`:`${s.distance.toFixed(1)} km`);
+            mk.bindPopup(`<div style="font-family:Inter,sans-serif;min-width:140px;"><strong>${s['Rótulo']||'Gasolinera'}</strong><p style="margin:3px 0;font-size:0.78rem;color:#64748b;">${s['Dirección']||''}</p><p style="margin:3px 0;font-size:0.95rem;font-weight:700;color:#10b981;">${price}€ <span style="font-size:0.72rem;color:#94a3b8;">${FUEL_NAMES[fuel]}</span></p><p style="margin:3px 0;font-size:0.72rem;color:#94a3b8;">${distLabel}</p></div>`);
+            markers.push(mk); s.marker=mk;
+        });
+    }
+
+    // ── Map click target ────────────────────────────────────────────────
+    let mapClickTarget=null;
+    function setMapClickTarget(pt) {
+        if (mapClickTarget===pt) { mapClickTarget=null; document.getElementById('map').classList.remove('map-click-active'); document.getElementById('pointABadge').classList.remove('map-selecting'); document.getElementById('pointBBadge').classList.remove('map-selecting'); return; }
+        mapClickTarget=pt;
+        document.getElementById('map').classList.add('map-click-active');
+        document.getElementById('pointABadge').classList.toggle('map-selecting',pt==='A');
+        document.getElementById('pointBBadge').classList.toggle('map-selecting',pt==='B');
+        closeModal('routeModal');
+        showStatus(`🖱️ Toca el mapa para fijar Punto ${pt}`);
+    }
+
+    async function setPointFromCoords(pt,lat,lng,label) {
+        if (pt==='A') { pointALocation={lat,lng}; document.getElementById('pointAInput').value=label||`${lat.toFixed(4)},${lng.toFixed(4)}`; }
+        else { pointBLocation={lat,lng}; document.getElementById('pointBInput').value=label||`${lat.toFixed(4)},${lng.toFixed(4)}`; }
+        if (!map) initMap(lat,lng); else map.setView([lat,lng],13);
+        addMarkersToMap();
+        showStatus(`✅ Punto ${pt}: ${label||`${lat.toFixed(4)},${lng.toFixed(4)}`}`);
+    }
+
+    async function searchPoint(pt) {
+        const addr=document.getElementById(pt==='A'?'pointAInput':'pointBInput').value.trim();
+        if (!addr) { showStatus(`⚠️ Introduce dirección para Punto ${pt}`,true); return; }
+        showStatus(`🔍 Buscando...`);
+        const loc=await geocodeAddress(addr);
+        if (!loc) { showStatus(`❌ No encontrado`,true); return; }
+        await setPointFromCoords(pt,loc.lat,loc.lng,loc.displayName.split(',').slice(0,3).join(','));
+    }
+
+    function useMyLocationForPoint(pt) {
+        if (!navigator.geolocation) { showStatus('❌ Geolocalización no disponible',true); return; }
+        navigator.geolocation.getCurrentPosition(async p=>await setPointFromCoords(pt,p.coords.latitude,p.coords.longitude,'Mi ubicación'),()=>showStatus('❌ No se pudo obtener ubicación',true));
+    }
+
+    function invertRoute() {
+        [pointALocation,pointBLocation]=[pointBLocation,pointALocation];
+        const va=document.getElementById('pointAInput').value;
+        document.getElementById('pointAInput').value=document.getElementById('pointBInput').value;
+        document.getElementById('pointBInput').value=va;
+        addMarkersToMap(); showStatus('🔄 Ruta invertida');
+    }
+
+    function getUserLocationAndLoad() {
+        if (!navigator.geolocation) { showStatus('❌ Geolocalización no disponible',true); return; }
+        showStatus('📍 Obteniendo ubicación...');
+        navigator.geolocation.getCurrentPosition(p=>{
+            userLocation={lat:p.coords.latitude,lng:p.coords.longitude};
+            initMap(userLocation.lat,userLocation.lng);
+            fetchGasStations(userLocation.lat,userLocation.lng);
+        },e=>{ showStatus(e.code===e.PERMISSION_DENIED?'❌ Permiso denegado':'❌ Error de ubicación',true); initMap(); });
+    }
+
+    async function searchByAddress() {
+        const addr=document.getElementById('addressInput').value.trim();
+        if (!addr) { showStatus('⚠️ Introduce una dirección',true); return; }
+        showStatus('🔍 Buscando...');
+        const loc=await geocodeAddress(addr);
+        if (!loc) { showStatus('❌ No se encontró la dirección',true); return; }
+        userLocation={lat:loc.lat,lng:loc.lng};
+        initMap(userLocation.lat,userLocation.lng);
+        await fetchGasStations(userLocation.lat,userLocation.lng);
+    }
+
+    async function traceRoute() {
+        if (!pointALocation) { showStatus('⚠️ Falta el Punto A',true); return; }
+        if (!pointBLocation) { showStatus('⚠️ Falta el Punto B',true); return; }
+        closeModal('routeModal');
+        showStatus('🗺️ Calculando rutas...');
+        document.getElementById('sheet-title').textContent='Gasolineras en la Ruta';
+        try {
+            allRoutes=await fetchAllRoutes(pointALocation.lat,pointALocation.lng,pointBLocation.lat,pointBLocation.lng);
+            selectedRouteIndex=0; routeData=allRoutes[0];
+            drawAllRoutesOnMap(allRoutes,0);
+            renderRouteAltsUI(allRoutes,0);
+            await fetchGasStationsAlongRoute();
+            showStatus(`✅ ${allRoutes.length} ruta(s) encontrada(s)`);
+        } catch(e) { showStatus('❌ '+e.message,true); }
+    }
+
+    async function refreshData() {
+        if (currentMode==='single'&&userLocation) await fetchGasStations(userLocation.lat,userLocation.lng);
+        else if (currentMode==='route'&&routeData) await fetchGasStationsAlongRoute();
+    }
+
+    // ── Autocomplete ────────────────────────────────────────────────────
+    const acT={}, acI={};
+    function setupAC(inputId,dropdownId,onSelect) {
+        const inp=document.getElementById(inputId), drop=document.getElementById(dropdownId);
+        acI[inputId]=-1;
+        inp.addEventListener('input',()=>{ clearTimeout(acT[inputId]); const v=inp.value.trim(); if(v.length<3){closeDrop(drop);return;} acT[inputId]=setTimeout(()=>fetchSugg(v,drop,inp,inputId,onSelect),300); });
+        inp.addEventListener('keydown',e=>{ const its=drop.querySelectorAll('.autocomplete-item'); if(!its.length)return; if(e.key==='ArrowDown'){e.preventDefault();acI[inputId]=Math.min(acI[inputId]+1,its.length-1);setActive(its,acI[inputId]);}else if(e.key==='ArrowUp'){e.preventDefault();acI[inputId]=Math.max(acI[inputId]-1,0);setActive(its,acI[inputId]);}else if(e.key==='Enter'&&acI[inputId]>=0){e.preventDefault();its[acI[inputId]].click();}else if(e.key==='Escape')closeDrop(drop); });
+        document.addEventListener('click',e=>{ if(!inp.contains(e.target)&&!drop.contains(e.target))closeDrop(drop); });
+    }
+    function setActive(items,i){items.forEach((el,j)=>el.classList.toggle('active',j===i));}
+    function closeDrop(d){d.classList.remove('open');d.innerHTML='';}
+    async function fetchSugg(q,drop,inp,id,onSelect) {
+        try {
+            const r=await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q+', España')}&format=json&limit=6&addressdetails=1`,{headers:{'User-Agent':'GasolinerasEspana/1.0'}});
+            const data=await r.json();
+            if(!data.length){closeDrop(drop);return;}
+            acI[id]=-1;
+            drop.innerHTML=data.map(item=>{const p=item.display_name.split(',');return`<div class="autocomplete-item" data-lat="${item.lat}" data-lng="${item.lon}" data-label="${p.slice(0,3).join(',')}"><div class="ac-main">${p.slice(0,2).join(',').trim()}</div><div class="ac-sub">${p.slice(2,5).join(',').trim()}</div></div>`;}).join('');
+            drop.querySelectorAll('.autocomplete-item').forEach(el=>el.addEventListener('click',()=>{inp.value=el.dataset.label;closeDrop(drop);onSelect(parseFloat(el.dataset.lat),parseFloat(el.dataset.lng),el.dataset.label);}));
+            drop.classList.add('open');
+        } catch { closeDrop(drop); }
+    }
+
+    // ── Init ────────────────────────────────────────────────────────────
+    loadCarCfg(); initMap();
+
+    document.querySelectorAll('input[name="fuelType"]').forEach(r=>r.addEventListener('change',()=>{if(stations.length)displayStations();}));
+    document.getElementById('sortSelect').addEventListener('change',()=>{if(stations.length)displayStations();});
+    document.getElementById('carConsumption').addEventListener('input',()=>{saveCarCfg();if(stations.length)displayStations();});
+    document.getElementById('carLiters').addEventListener('input',()=>{saveCarCfg();if(stations.length)displayStations();});
+    document.getElementById('addressInput').addEventListener('keypress',e=>{if(e.key==='Enter')searchByAddress();});
+
+    setupAC('addressInput','acSingle',(lat,lng,label)=>{userLocation={lat,lng};initMap(lat,lng);fetchGasStations(lat,lng);});
+    setupAC('pointAInput','acPointA',(lat,lng,label)=>setPointFromCoords('A',lat,lng,label));
+    setupAC('pointBInput','acPointB',(lat,lng,label)=>setPointFromCoords('B',lat,lng,label));
+</script>
+</body>
+</html>
