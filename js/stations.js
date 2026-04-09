@@ -111,7 +111,7 @@ export async function fetchGasStationsAlongRoute() {
                 return { ...s, lat, lng, distToRoute: minDistToRoute(lat, lng, state.routeData.coordinates) };
             })
             .filter(s => !isNaN(s.lat) && !isNaN(s.lng) && s.distToRoute <= corridorKm)
-            .slice(0, 80);
+            .slice(0, 20);
 
         state.routeStations = candidates;
         state.stations      = candidates;
